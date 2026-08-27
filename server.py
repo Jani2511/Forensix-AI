@@ -1,17 +1,185 @@
 from flask import Flask, request, jsonify, render_template_string
+from openai import OpenAI
 from google import genai
 import os
 
 app = Flask(__name__)
 
-# Gemini
-api_key = os.environ.get("GEMINI_API_KEY")
 
-if not api_key:
-    raise RuntimeError("GEMINI_API_KEY environment variable is missing.")
+# =========================================================
+# AI CLIENTS
+# =========================================================
 
-client = genai.Client(api_key=api_key)
+openrouter = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ.get("OPENROUTER_API_KEY")
+)
 
+nvidia = OpenAI(
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key=os.environ.get("NVIDIA_API_KEY")
+)
+
+gemini = genai.Client(
+    api_key=os.environ.get("GEMINI_API_KEY")
+)
+
+
+# =========================================================
+# SYSTEM PROMPT
+# =========================================================
+
+SYSTEM_PROMPT = """
+You are Forensix AI, an educational forensic science assistant.
+
+Answer only as much as the user's question requires.
+
+For normal/simple questions:
+- Give a concise answer.
+- Usually 2-5 short paragraphs or a few clear points.
+- Do not automatically give a huge lecture.
+
+Only give a long, deep and comprehensive answer when the user explicitly
+asks for words such as:
+deep, detailed, in detail, elaborate, comprehensive, long answer,
+full explanation, deep dive, extensive explanation, or similar wording.
+
+Do not begin every answer with:
+"Hello! I am Forensix AI."
+
+The website handles the welcome message.
+
+Refer to yourself as "Forensix AI".
+
+Focus on:
+forensic science,
+crime scene investigation,
+forensic biology,
+DNA,
+fingerprints,
+toxicology,
+questioned documents,
+forensic chemistry,
+digital forensics,
+forensic anthropology,
+forensic pathology,
+ballistics,
+trace evidence,
+and related educational subjects.
+
+Be scientifically accurate.
+Do not invent evidence or facts.
+Mention uncertainty when appropriate.
+
+Keep answers educational and clear.
+"""
+
+
+# =========================================================
+# OPENROUTER
+# =========================================================
+
+def ask_openrouter(question):
+
+    print("Trying provider 1: OpenRouter / GLM 5.3 Flash", flush=True)
+
+    response = openrouter.chat.completions.create(
+        model="z-ai/glm-5.3-flash",
+        messages=[
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": question
+            }
+        ],
+        max_tokens=1000,
+        temperature=0.4
+    )
+
+    answer = response.choices[0].message.content
+
+    if not answer:
+        raise Exception("OpenRouter returned empty response")
+
+    print("Provider 1 SUCCESS", flush=True)
+
+    return answer
+
+
+# =========================================================
+# NVIDIA
+# =========================================================
+
+def ask_nvidia(question):
+
+    print("Trying provider 2: NVIDIA Nemotron", flush=True)
+
+    response = nvidia.chat.completions.create(
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",
+        messages=[
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": question
+            }
+        ],
+        max_tokens=1000,
+        temperature=0.4,
+
+        extra_body={
+            "chat_template_kwargs": {
+                "enable_thinking": False
+            }
+        }
+    )
+
+    answer = response.choices[0].message.content
+
+    if not answer:
+        raise Exception("NVIDIA returned empty response")
+
+    print("Provider 2 SUCCESS", flush=True)
+
+    return answer
+
+
+# =========================================================
+# GEMINI
+# =========================================================
+
+def ask_gemini(question):
+
+    print("Trying provider 3: Gemini", flush=True)
+
+    response = gemini.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=f"""
+{SYSTEM_PROMPT}
+
+User question:
+{question}
+"""
+    )
+
+    answer = response.text
+
+    if not answer:
+        raise Exception("Gemini returned empty response")
+
+    print("Provider 3 SUCCESS", flush=True)
+
+    return answer
+
+
+# =========================================================
+# HOME
+# =========================================================
 
 HTML = """
 <!DOCTYPE html>
@@ -20,7 +188,9 @@ HTML = """
 <head>
 
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
 
 <title>Forensix AI</title>
 
@@ -30,46 +200,26 @@ HTML = """
     box-sizing: border-box;
 }
 
-html,
 body {
     margin: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    font-family: Arial, Helvetica, sans-serif;
     background: #080d12;
     color: #e8edf2;
+    font-family: Arial, Helvetica, sans-serif;
 }
-
-body {
-    display: flex;
-}
-
-/* APP */
 
 .app {
-    width: 100%;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
 }
 
-/* HEADER */
-
 .header {
-    height: 70px;
-    flex-shrink: 0;
-
+    height: 72px;
+    background: #0d141b;
+    border-bottom: 1px solid #26343f;
     display: flex;
     align-items: center;
-
     padding: 0 28px;
-
-    background: rgba(10, 16, 22, 0.96);
-
-    border-bottom: 1px solid #26343f;
-
-    z-index: 10;
 }
 
 .logo {
@@ -81,317 +231,170 @@ body {
 .logo-icon {
     width: 42px;
     height: 42px;
-
+    border: 1px solid #526675;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
-
-    border: 1px solid #536774;
-    border-radius: 9px;
-
-    background: #111b23;
-
     font-size: 21px;
+    background: #111b23;
 }
 
 .logo-text {
     font-size: 21px;
     font-weight: 700;
-    letter-spacing: 0.5px;
 }
 
 .logo-sub {
-    margin-top: 3px;
-
-    font-size: 9px;
-    color: #718490;
-
+    font-size: 10px;
+    color: #81919d;
     letter-spacing: 2px;
 }
 
-/* CHAT */
+.main {
+    flex: 1;
+    display: flex;
+    width: 100%;
+    margin: auto;
+}
 
 .chat {
     flex: 1;
-    min-height: 0;
-
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 
-/* WELCOME */
-
 .welcome {
-    flex-shrink: 0;
-
+    padding: 65px 30px 25px;
     text-align: center;
-
-    padding: 45px 20px 20px;
 }
 
 .welcome-symbol {
-    width: 64px;
-    height: 64px;
-
+    width: 68px;
+    height: 68px;
     margin: auto;
-
+    border: 1px solid #526675;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
-
-    border: 1px solid #536774;
-    border-radius: 14px;
-
+    font-size: 30px;
     background: #101a22;
-
-    font-size: 28px;
 }
 
 .welcome h1 {
-    margin: 17px 0 7px;
-
+    margin: 20px 0 8px;
     font-size: 30px;
 }
 
 .welcome p {
+    color: #82929d;
     margin: 0;
-
-    color: #7e909c;
-
     font-size: 14px;
 }
 
-/* MESSAGES */
-
 .messages {
     flex: 1;
-    min-height: 0;
-
     overflow-y: auto;
-
-    padding: 15px 25px 30px;
-
+    padding: 25px 30px;
     scroll-behavior: smooth;
 }
 
 .message {
     max-width: 850px;
+    margin: 0 auto 22px;
+}
 
-    margin: 0 auto 25px;
+.user {
+    background: #16212a;
+    border: 1px solid #2a3a46;
+    border-radius: 10px;
+    padding: 14px 16px;
+}
+
+.ai {
+    padding: 5px 4px;
+    line-height: 1.65;
 }
 
 .label {
-    margin-bottom: 7px;
-
-    font-size: 9px;
-
-    letter-spacing: 1.6px;
-
+    font-size: 10px;
+    letter-spacing: 1.5px;
     color: #718490;
+    margin-bottom: 7px;
 }
-
-/* USER */
-
-.user {
-    display: inline-block;
-
-    max-width: 80%;
-
-    padding: 13px 16px;
-
-    background: #17232c;
-
-    border: 1px solid #2c3c47;
-
-    border-radius: 12px;
-
-    line-height: 1.55;
-
-    white-space: pre-wrap;
-
-    word-wrap: break-word;
-}
-
-/* AI */
-
-.ai {
-    padding: 5px 2px;
-
-    line-height: 1.7;
-
-    white-space: pre-wrap;
-
-    word-wrap: break-word;
-}
-
-/* LOADING */
-
-.loading {
-    color: #82939e;
-
-    font-style: italic;
-
-    animation: pulse 1.4s infinite;
-}
-
-@keyframes pulse {
-
-    0% {
-        opacity: 0.45;
-    }
-
-    50% {
-        opacity: 1;
-    }
-
-    100% {
-        opacity: 0.45;
-    }
-
-}
-
-/* INPUT */
 
 .input-area {
-    flex-shrink: 0;
-
-    padding: 15px 25px 20px;
-
-    background: rgba(8, 13, 18, 0.97);
-
+    padding: 18px 30px 25px;
     border-top: 1px solid #26343f;
+    background: #0b1117;
 }
 
 .input-box {
     max-width: 850px;
-
     margin: auto;
-
     position: relative;
 }
 
 textarea {
     width: 100%;
-
-    height: 62px;
-
     resize: none;
-
-    padding: 15px 60px 15px 16px;
-
+    height: 65px;
     background: #111a22;
-
     color: #edf2f5;
-
     border: 1px solid #334550;
-
-    border-radius: 11px;
-
-    outline: none;
-
-    font-family: inherit;
-
+    border-radius: 10px;
+    padding: 16px 65px 16px 16px;
     font-size: 14px;
-
-    line-height: 1.5;
+    outline: none;
 }
 
 textarea:focus {
-    border-color: #617582;
+    border-color: #637986;
 }
 
-textarea::placeholder {
-    color: #667781;
-}
-
-/* SEND */
-
-.send {
+button {
     position: absolute;
-
-    right: 8px;
-    bottom: 8px;
-
-    width: 44px;
-    height: 44px;
-
-    border: 1px solid #536774;
-
-    border-radius: 9px;
-
-    background: #1a2933;
-
+    right: 9px;
+    bottom: 9px;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #566975;
+    background: #1b2933;
     color: white;
-
-    font-size: 18px;
-
+    border-radius: 8px;
     cursor: pointer;
+    font-size: 18px;
 }
 
-.send:hover {
+button:hover {
     background: #263843;
 }
 
-.send:disabled {
-    opacity: 0.45;
-
-    cursor: not-allowed;
-}
-
-/* STATUS */
-
 .status {
     max-width: 850px;
-
-    margin: 7px auto 0;
-
-    font-size: 9px;
-
-    color: #5f717c;
+    margin: 8px auto 0;
+    font-size: 10px;
+    color: #61727e;
 }
 
-/* SCROLLBAR */
-
-.messages::-webkit-scrollbar {
-    width: 6px;
-}
-
-.messages::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.messages::-webkit-scrollbar-thumb {
-    background: #263640;
-
-    border-radius: 10px;
-}
-
-/* MOBILE */
-
-@media(max-width: 700px) {
+@media(max-width: 750px) {
 
     .header {
         padding: 0 16px;
     }
 
     .messages {
-        padding: 15px 16px 25px;
-    }
-
-    .input-area {
-        padding: 12px 16px 16px;
+        padding: 20px 16px;
     }
 
     .welcome {
-        padding-top: 35px;
+        padding: 45px 20px 20px;
     }
 
-    .welcome h1 {
-        font-size: 25px;
-    }
-
-    .user {
-        max-width: 90%;
+    .input-area {
+        padding: 12px 16px 18px;
     }
 
 }
@@ -405,322 +408,235 @@ textarea::placeholder {
 
 <div class="app">
 
-
 <header class="header">
 
-    <div class="logo">
+<div class="logo">
 
-        <div class="logo-icon">
-            🔬
-        </div>
+<div class="logo-icon">🔬</div>
 
-        <div>
+<div>
 
-            <div class="logo-text">
-                Forensix AI
-            </div>
+<div class="logo-text">
+Forensix AI
+</div>
 
-            <div class="logo-sub">
-                FORENSIC INTELLIGENCE SYSTEM
-            </div>
+<div class="logo-sub">
+FORENSIC INTELLIGENCE SYSTEM
+</div>
 
-        </div>
+</div>
 
-    </div>
+</div>
 
 </header>
 
+
+<div class="main">
 
 <section class="chat">
 
 
 <div class="welcome" id="welcome">
 
-    <div class="welcome-symbol">
-        🔬
-    </div>
+<div class="welcome-symbol">
+🔬
+</div>
 
-    <h1>
-        Forensix AI
-    </h1>
+<h1>
+Forensix AI
+</h1>
 
-    <p>
-        Your educational forensic science intelligence assistant.
-    </p>
+<p>
+Your educational forensic science intelligence assistant.
+</p>
 
 </div>
 
 
-<div
-    class="messages"
-    id="messages"
-></div>
+<div class="messages" id="messages"></div>
 
 
 <div class="input-area">
 
-    <div class="input-box">
+<div class="input-box">
 
-        <textarea
-            id="question"
-            placeholder="Ask a forensic science question..."
-        ></textarea>
+<textarea
+id="question"
+placeholder="Ask a forensic science question..."
+onkeydown="handleKey(event)"
+></textarea>
 
-        <button
-            class="send"
-            id="sendButton"
-            onclick="askAI()"
-        >
-            ➤
-        </button>
+<button onclick="askAI()">
+➤
+</button>
 
-    </div>
+</div>
 
-    <div class="status">
-        Forensix AI • Educational use • AI-generated information
-    </div>
+<div class="status">
+Forensix AI • Educational use • AI-generated information
+</div>
 
 </div>
 
 
 </section>
 
+</div>
 
 </div>
 
 
 <script>
 
-const questionBox =
-    document.getElementById("question");
+function handleKey(event) {
 
-const messages =
-    document.getElementById("messages");
+    if (event.key === "Enter" && !event.shiftKey) {
 
-const sendButton =
-    document.getElementById("sendButton");
+        event.preventDefault();
 
-const welcome =
-    document.getElementById("welcome");
-
-
-/* ENTER TO SEND */
-
-questionBox.addEventListener(
-    "keydown",
-    function(event) {
-
-        if (
-            event.key === "Enter" &&
-            !event.shiftKey
-        ) {
-
-            event.preventDefault();
-
-            askAI();
-        }
+        askAI();
 
     }
-);
+
+}
 
 
-/* SCROLL */
+function scrollChat() {
 
-function scrollToBottom() {
+    const messages =
+        document.getElementById("messages");
 
-    requestAnimationFrame(function() {
-
-        messages.scrollTop =
-            messages.scrollHeight;
-
+    messages.scrollTo({
+        top: messages.scrollHeight,
+        behavior: "smooth"
     });
 
 }
 
 
-/* ADD MESSAGE */
-
 function addMessage(type, text) {
 
-    const wrapper =
+    const messages =
+        document.getElementById("messages");
+
+    const div =
         document.createElement("div");
 
-    wrapper.className =
-        "message";
+    div.className = "message";
 
     const label =
-        document.createElement("div");
-
-    label.className =
-        "label";
-
-    label.textContent =
         type === "user"
-            ? "YOU"
-            : "FORENSIX AI";
+        ? "YOU"
+        : "FORENSIX AI";
 
     const content =
-        document.createElement("div");
+        String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\\n/g, "<br>");
 
-    content.className =
-        type;
+    div.innerHTML =
+        '<div class="label">' +
+        label +
+        '</div>' +
+        '<div class="' +
+        type +
+        '">' +
+        content +
+        '</div>';
 
-    content.textContent =
-        text;
+    messages.appendChild(div);
 
-    wrapper.appendChild(label);
+    scrollChat();
 
-    wrapper.appendChild(content);
-
-    messages.appendChild(wrapper);
-
-    scrollToBottom();
-
-    return wrapper;
 }
 
 
-/* ASK AI */
-
 async function askAI() {
 
+    const box =
+        document.getElementById("question");
+
     const question =
-        questionBox.value.trim();
+        box.value.trim();
 
-    if (!question) {
-        return;
-    }
+    if (!question) return;
 
 
-    /* HIDE WELCOME */
+    document
+        .getElementById("welcome")
+        .style.display = "none";
 
-    welcome.style.display =
-        "none";
 
+    addMessage("user", question);
 
-    /* ADD USER MESSAGE */
+    box.value = "";
 
     addMessage(
-        "user",
-        question
+        "ai",
+        "Analyzing your question..."
     );
 
 
-    questionBox.value = "";
-
-    sendButton.disabled = true;
-
-
-    /* LOADING */
-
-    const loadingMessage =
-        addMessage(
-            "ai",
-            "Analyzing your question..."
-        );
-
-    loadingMessage
-        .querySelector(".ai")
-        .classList.add("loading");
+    const loading =
+        document
+        .getElementById("messages")
+        .lastElementChild;
 
 
     try {
 
         const response =
-            await fetch(
-                "/ask",
-                {
-                    method: "POST",
+            await fetch("/ask", {
 
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
+                method: "POST",
 
-                    body: JSON.stringify({
-                        question:
-                            question
-                    })
-                }
+                headers: {
+                    "Content-Type":
+                    "application/json"
+                },
+
+                body: JSON.stringify({
+                    question: question
+                })
+
+            });
+
+
+        const data =
+            await response.json();
+
+
+        loading.remove();
+
+
+        if (response.ok && data.answer) {
+
+            addMessage(
+                "ai",
+                data.answer
             );
 
-
-        let data;
-
-        try {
-
-            data =
-                await response.json();
-
-        } catch {
-
-            throw new Error(
-                "Server returned an invalid response."
-            );
-
-        }
-
-
-        /* REMOVE LOADING */
-
-        loadingMessage.remove();
-
-
-        if (!response.ok) {
+        } else {
 
             addMessage(
                 "ai",
                 data.error ||
-                "The server could not process your question."
+                "Unable to generate an answer."
             );
 
-            return;
         }
 
 
-        if (
-            !data.answer ||
-            !data.answer.trim()
-        ) {
+    } catch (error) {
 
-            addMessage(
-                "ai",
-                "No answer was returned."
-            );
-
-            return;
-        }
-
-
-        /* ANSWER */
+        loading.remove();
 
         addMessage(
             "ai",
-            data.answer
+            "Connection error. Please try again."
         );
-
-    }
-
-    catch (error) {
-
-        loadingMessage.remove();
-
-        addMessage(
-            "ai",
-            "Connection error: " +
-            error.message
-        );
-
-    }
-
-    finally {
-
-        sendButton.disabled =
-            false;
-
-        questionBox.focus();
-
-        scrollToBottom();
 
     }
 
@@ -728,12 +644,15 @@ async function askAI() {
 
 </script>
 
-
 </body>
 
 </html>
 """
 
+
+# =========================================================
+# ROUTES
+# =========================================================
 
 @app.route("/", methods=["GET"])
 def home():
@@ -746,167 +665,118 @@ def ask():
 
     try:
 
-        data = request.get_json(
-            silent=True
-        )
+        data = request.get_json(silent=True) or {}
 
-        if not data:
-
-            return jsonify({
-                "error":
-                "Invalid request."
-            }), 400
-
-
-        question = str(
-            data.get("question", "")
+        question = data.get(
+            "question",
+            ""
         ).strip()
 
 
         if not question:
 
             return jsonify({
-                "error":
-                "Question is required."
+                "error": "Question is required"
             }), 400
 
 
-        # Detect whether the user wants a deep answer
-        question_lower = question.lower()
+        # =================================================
+        # PROVIDER 1
+        # =================================================
 
-        deep_words = [
-            "deep",
-            "deeply",
-            "detailed",
-            "detail",
-            "in detail",
-            "elaborate",
-            "elaboration",
-            "comprehensive",
-            "comprehensively",
-            "long answer",
-            "full explanation",
-            "extensive",
-            "deep dive",
-            "explain thoroughly",
-            "explain deeply"
-        ]
+        try:
 
-        wants_deep_answer = any(
-            word in question_lower
-            for word in deep_words
-        )
-
-
-        if wants_deep_answer:
-
-            length_instruction = """
-The user explicitly wants a deep or detailed answer.
-
-Give a comprehensive explanation with useful structure,
-examples where appropriate, important forensic considerations,
-and relevant scientific context.
-
-Do not add unnecessary repetition.
-"""
-
-        else:
-
-            length_instruction = """
-The user did NOT ask for a deep or detailed answer.
-
-Keep the answer concise and focused.
-
-For a simple question, normally answer in roughly
-3-6 sentences or a few short bullet points.
-
-Do not turn a simple question into a long lecture.
-"""
-
-
-        prompt = f"""
-You are Forensix AI, an educational forensic science assistant.
-
-Your name is ALWAYS "Forensix AI".
-
-Never start an answer with:
-"Hello! I am Forensix AI"
-or
-"Hello, I am Forensix AI".
-
-The website handles the initial welcome message.
-
-{length_instruction}
-
-Answer the user's actual question directly.
-
-Focus on accurate forensic science education including:
-crime scene investigation,
-forensic biology,
-DNA,
-fingerprints,
-forensic chemistry,
-toxicology,
-questioned documents,
-firearms and toolmarks,
-trace evidence,
-digital forensics,
-forensic anthropology,
-forensic pathology,
-and related forensic subjects.
-
-Use clear language suitable for a forensic science student.
-
-Do not invent facts, evidence, case details, statistics,
-or scientific findings.
-
-If something is uncertain or depends on circumstances,
-say so clearly.
-
-User question:
-{question}
-"""
-
-
-        response = client.models.generate_content(
-
-            model="gemini-3.6-flash",
-
-            contents=prompt
-        )
-
-
-        answer = response.text
-
-
-        if not answer:
+            answer = ask_openrouter(question)
 
             return jsonify({
-                "error":
-                "The AI returned an empty response."
-            }), 502
+                "answer": answer,
+                "provider": "OpenRouter"
+            })
+
+        except Exception as e:
+
+            print(
+                "OpenRouter FAILED:",
+                repr(e),
+                flush=True
+            )
 
 
-        return jsonify({
-            "answer":
-            answer
-        })
+        # =================================================
+        # PROVIDER 2
+        # =================================================
+
+        try:
+
+            answer = ask_nvidia(question)
+
+            return jsonify({
+                "answer": answer,
+                "provider": "NVIDIA"
+            })
+
+        except Exception as e:
+
+            print(
+                "NVIDIA FAILED:",
+                repr(e),
+                flush=True
+            )
 
 
-    except Exception as e:
+        # =================================================
+        # PROVIDER 3
+        # =================================================
+
+        try:
+
+            answer = ask_gemini(question)
+
+            return jsonify({
+                "answer": answer,
+                "provider": "Gemini"
+            })
+
+        except Exception as e:
+
+            print(
+                "Gemini FAILED:",
+                repr(e),
+                flush=True
+            )
+
+
+        # =================================================
+        # ALL FAILED
+        # =================================================
 
         print(
-            "ERROR /ask:",
-            repr(e),
+            "ALL AI PROVIDERS FAILED",
             flush=True
         )
 
         return jsonify({
             "error":
-            "Forensix AI could not process this request right now. "
-            "Please try again."
+            "All AI providers are temporarily unavailable. Please try again in a moment."
+        }), 503
+
+
+    except Exception as e:
+
+        print(
+            "FATAL /ask ERROR:",
+            repr(e),
+            flush=True
+        )
+
+        return jsonify({
+            "error": "Internal server error"
         }), 500
 
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
 
