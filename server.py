@@ -2,8 +2,18 @@ from flask import Flask, request, jsonify, render_template_string
 from openai import OpenAI
 from google import genai
 import os
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
 
 
 # =========================================================
@@ -14,7 +24,6 @@ openrouter = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.environ.get("OPENROUTER_API_KEY")
 )
-
 nvidia = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
     api_key=os.environ.get("NVIDIA_API_KEY")
@@ -660,8 +669,11 @@ def home():
     return render_template_string(HTML)
 
 
-@app.route("/ask", methods=["POST"])
+@app.route("/ask", methods=["POST", "OPTIONS"])
 def ask():
+
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
 
     try:
 
